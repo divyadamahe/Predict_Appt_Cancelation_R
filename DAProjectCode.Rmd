@@ -1,0 +1,199 @@
+---
+title: "Data Analystics Project- Predicting medical appointment no shows"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(arules)
+library(tidyverse)  # data manipulation
+library(tidyverse)  # data manipulation
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+library(gridExtra)  # subfigure layout package
+library(dendextend) # for comparing two dendrograms
+library(arulesViz)
+library(tidyr)
+library(ggplot2)
+library(rpart)
+library(caret)
+library(knitr)
+library(mltools)
+library(data.table)
+library(factoextra)
+library(purrr)
+library(cluster)
+library(rattle)
+library(pROC)
+library(rpart.plot)
+library(tibble)
+library(RWeka)       # Weka
+library(party)       # A computational toolbox for recursive partitioning
+library(partykit)    # A toolkit with infrastructure for representing, summarizing, and visualizing tree-structured regression and classification models.
+library(tidyverse)
+
+# Helper packages
+library(dplyr)       # for data wrangling
+library(ggplot2)     # for awesome plotting
+
+# Modeling packages
+library(rpart)       # direct engine for decision tree application
+library(caret)       # meta engine for decision tree application
+library(AmesHousing) # dataset
+
+# Model interpretability packages
+library(rpart.plot)  # for plotting decision trees
+library(vip)         # for feature importance
+library(pdp)         # for feature effects 
+```
+
+```{r}
+setwd("C:/Users/Divya/Desktop/Syracuse University/Sem 2/Data Analytics/Project")
+df <- read.csv("KaggleV2-May-2016.csv")
+str(df)
+table(df$Response)
+barplot(table(df$No.show))
+
+```
+
+```{r}
+sum(sapply(df, is.na))
+sum(sapply(df, is.infinite))
+sum(sapply(df, is.nan))
+```
+
+```{r}
+df_noshow<- df[df$No.show == "Yes",]
+df_show<- df[df$No.show == "No",]
+```
+
+```{r}
+df_show_cut<-createDataPartition(df_show$No.show,p=0.05,list = F)
+df_noshow_cut<-createDataPartition(df_noshow$No.show,p=0.20,list = F)
+
+df_show<-df_show[df_show_cut,]
+df_noshow<-df_noshow[df_noshow_cut,]
+
+str(df_show)
+str(df_noshow)
+
+dfa<-rbind(df_show, df_noshow)
+table(dfa$No.show)
+```
+Reshuffling the data and splitting the data into training and testing data
+```{r}
+dfnew <- slice(dfa, sample(1:n())) #reshuffling the dataset
+
+```
+
+```{r}
+#formatting date to calculate days between the Scheduled and Appointment day
+dfnew$a<-as.Date(dfnew$ScheduledDay,format = "%Y-%m-%d")
+dfnew$b<-as.Date(dfnew$AppointmentDay,format = "%Y-%m-%d")
+dfnew$c<-difftime(dfnew$b,dfnew$a,units = "d")
+```
+
+```{r}
+keeps<- c("Age" , "Gender" , "Scholarship" , "Hipertension" , "Diabetes" , "Alcoholism", "Handcap", "SMS_received", "No.show", "c")
+newdf<- dfnew[keeps]
+```
+
+```{r}
+df_to_split = caret::createDataPartition(newdf$No.show,p = 0.7,list = F)
+train<-newdf[df_to_split,]
+test<-newdf[-df_to_split,]
+str(train)
+str(test)
+```
+
+Naive Bayes
+```{r}
+model1_nb<-train(No.show~.,data = train,method="nb",trControl=trainControl(method="cv",number=3))
+```
+
+
+KNN 
+```{r}
+model1_knn<-train(No.show~.,data = train,method = "knn", trControl = trainControl( method = "repeatedcv",number = 4,repeats = 5))
+
+model1_knn
+```
+
+```{r}
+predict_knn1<-predict(model1_knn,test)
+
+confusionMatrix(predict_knn1,as.factor(test$No.show),positive = "Yes")
+```
+```{r}
+modelbest_knn <- train(No.show~.,data = train,tuneGrid = data.frame(k=14:30),method = "knn", trControl = trainControl(method = "repeatedcv",number = 5,repeats = 3))
+
+plot(modelbest_knn)
+```
+```{r}
+predict_knn1<-predict(modelbest_knn,test)
+
+confusionMatrix(predict_knn1,as.factor(test$No.show),positive = "Yes")
+
+```
+```{r}
+model1_lgd<-glm(as.factor(No.show)~.,data = train, family = binomial(link="logit") )
+summary(model1_lgd)
+```
+
+```{r}
+model1_lg<-glm(as.factor(No.show)~Age+ Diabetes+c + SMS_received,data = train, family = binomial(link="logit") )
+summary(model1_lg)
+
+```
+
+
+
+```{r} 
+#Predicting lg model
+predict_lg3<-data.frame(a=predict(model1_lg,test, type= "response"))
+predict_lg3$b <- "No"
+predict_lg3$b[predict_lg3$a>0.5]<-"Yes"
+confusionMatrix(as.factor(predict_lg3$b),as.factor(test$No.show),positive = "Yes")
+```
+
+```{r}
+
+modelbest_svmLin <- train(No.show~.,data = train,method = "svmLinear",trControl=trainControl(method = "cv",number = 4),tuneGrid = expand.grid(C = seq(1,3,0.1)))
+modelbest_svmLin
+pBest_svmLin<-predict(modelbest_svmLin,test)
+
+confusionMatrix(pBest_svmLin,as.factor(test$No.show),positive = "Yes")
+```
+```{r}
+model1_rf<-train(No.show~.,data = train,method = "rf",tuneGrid = expand.grid(mtry =seq(2,4,2)))
+
+predict_RF<-predict(model1_rf,test)
+
+predict_RF2<-predict(model1_rf,test,type = "prob")
+
+confusionMatrix(predict_RF,as.factor(test$No.show) ,positive = "Yes")
+```
+```{r}
+#Decision tree
+grid <- expand.grid(.M=c(2,3,4,5,6,7,8,9,10), 
+                    .C=c(0.01,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45))
+optimal_model <- train(No.show~ ., 
+                      data=train, 
+                      method="J48",
+                      trControl = trainControl(method = "cv",number = 3),tuneGrid = grid)
+training_pred <- predict(optimal_model, newdata = train)
+
+confusionMatrix(data = training_pred, reference = as.factor(train$No.show))
+```
+
+```{r}
+library(neuralnet)
+ann<-neuralnet(formula = No.show~Scholarship+Diabetes,data = train,hidden = c(3,4),linear.output = F)
+predict_ann<-predict(ann,test)
+predict_ann
+```
